@@ -9,9 +9,46 @@ from datetime import datetime, date, timedelta, timezone
 from rapidfuzz import fuzz
 
 
-# =========================
+# =========================================================
+# SAYFA AYARI
+# =========================================================
+
+st.set_page_config(
+    page_title="Eczane Sipariş Motoru",
+    layout="wide"
+)
+
+
+# =========================================================
+# SABİT LİSTE DIŞI BAŞLANGIÇLAR
+# =========================================================
+
+LISTE_DISI_BASLANGICLAR_RAW = [
+    "CUBITAN",
+    "DIASIP",
+    "ENSURE",
+    "FORTIMEL",
+    "FORTINI",
+    "GLUCERNA",
+    "IMPACT",
+    "NUTRISON",
+    "NUTRIVIGOR",
+    "PEDIASURE",
+    "PEPTAMEN",
+    "RESOURCE",
+    "ENJEKTOR",
+    "MAJISTRAL",
+    "SENTE",
+    "SARIINTRAKET",
+    "INFATRINI",
+    "VITAL",
+    "SANITAYARA",
+]
+
+
+# =========================================================
 # TÜRKÇE TARİH / RAPOR ARALIĞI
-# =========================
+# =========================================================
 
 TURKCE_AYLAR = {
     1: "Ocak",
@@ -53,14 +90,13 @@ def onerilen_rapor_araligi():
     return baslangic, bitis
 
 
-# =========================
+# =========================================================
 # RESMİ TATİL / İŞ GÜNÜ HESABI
-# =========================
+# =========================================================
 
 def turkiye_resmi_tatilleri(yil):
     tatiller = set()
 
-    # Sabit resmi tatiller
     tatiller.add(date(yil, 1, 1))
     tatiller.add(date(yil, 4, 23))
     tatiller.add(date(yil, 5, 1))
@@ -69,7 +105,6 @@ def turkiye_resmi_tatilleri(yil):
     tatiller.add(date(yil, 8, 30))
     tatiller.add(date(yil, 10, 29))
 
-    # 2025-2030 dini bayram günleri
     dini_tatiller = {
         2025: [
             date(2025, 3, 30), date(2025, 3, 31), date(2025, 4, 1),
@@ -141,9 +176,9 @@ def ay_is_gunu_bilgisi(referans_tarih):
     return toplam_is_gunu, kalan_is_gunu, ay_son_gun
 
 
-# =========================
+# =========================================================
 # ÜRÜN ADI NORMALİZE
-# =========================
+# =========================================================
 
 def normalize_urun_adi(text):
     if pd.isna(text):
@@ -151,7 +186,7 @@ def normalize_urun_adi(text):
 
     text = str(text)
 
-    # ÜBS tarafındaki küçük l / büyük I karışıklığı için korunuyor.
+    # ÜBS tarafındaki küçük l / büyük I karışıklığı için
     text = text.replace("l", "I")
 
     text = text.upper()
@@ -170,22 +205,35 @@ def normalize_urun_adi(text):
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    for ch in [".", ",", ";", ":", "/", "\\", "-", "_", "(", ")", "[", "]", "*", "%"]:
+    # % işareti bilerek kaldırılmıyor.
+    for ch in [".", ",", ";", ":", "/", "\\", "-", "_", "(", ")", "[", "]", "*"]:
         text = text.replace(ch, "")
 
     text = re.sub(r"\s+", "", text)
 
+    # Sayıdan sonra gelen O harfini 0 yapar: 2OO -> 200
     for _ in range(5):
         text = re.sub(r"(\d)O", r"\g<1>0", text)
 
     return text
 
 
-def gorunen_urun_adi_olustur(normalize_key):
-    """
-    ÜBS ürün adını göstermeden normalize key üzerinden okunabilir ürün adı üretir.
-    """
+LISTE_DISI_BASLANGICLAR = [
+    normalize_urun_adi(x) for x in LISTE_DISI_BASLANGICLAR_RAW
+]
 
+
+def liste_disi_baslangic_bul(normalize_key):
+    normalize_key = str(normalize_key)
+
+    for raw, key in zip(LISTE_DISI_BASLANGICLAR_RAW, LISTE_DISI_BASLANGICLAR):
+        if normalize_key.startswith(key):
+            return True, raw
+
+    return False, ""
+
+
+def gorunen_urun_adi_olustur(normalize_key):
     text = str(normalize_key)
 
     if text == "" or text == "NAN":
@@ -261,6 +309,8 @@ def gorunen_urun_adi_olustur(normalize_key):
         "KOMPRES",
         "GAZ",
         "STERIL",
+        "ENERJI",
+        "ENERGY",
     ]
 
     kelimeler = sorted(set(kelimeler), key=len, reverse=True)
@@ -273,9 +323,9 @@ def gorunen_urun_adi_olustur(normalize_key):
     return text
 
 
-# =========================
+# =========================================================
 # SAYI OKUMA / FORMATLAMA
-# =========================
+# =========================================================
 
 def to_number(value):
     if pd.isna(value):
@@ -314,12 +364,13 @@ def sayi_formatla(value):
     return value
 
 
-# =========================
+# =========================================================
 # MASTER DOSYA
 # urun_master.xlsx
-# B kolonu: ürün adı
-# C kolonu: X ise hariç
-# =========================
+# Sadece isim standardizasyonu için kullanılır.
+# B kolonu: standart ürün adı
+# C kolonu artık kullanılmaz.
+# =========================================================
 
 def master_dosya_yolu_bul():
     try:
@@ -330,25 +381,27 @@ def master_dosya_yolu_bul():
     return os.path.join(app_klasoru, "urun_master.xlsx")
 
 
-def oku_master_haric_urunler():
-    master_path = master_dosya_yolu_bul()
-
+@st.cache_data(show_spinner=False)
+def oku_master_standart_isimler_cached(master_path, master_mtime):
     if not os.path.exists(master_path):
-        return set(), pd.DataFrame(), False
+        return {}, pd.DataFrame(), False, {
+            "master_okundu": False,
+            "master_toplam_satir": 0,
+            "master_standart_key_sayisi": 0,
+        }
 
     try:
-        master_df = pd.read_excel(master_path, usecols="B,C", header=None)
+        master_df = pd.read_excel(master_path, usecols="B", header=None)
     except Exception as e:
         raise ValueError(
-            "Kontrol listesi okunamadı. Lütfen sistem yöneticinizle görüşün."
+            "Master dosya okunamadı. Lütfen urun_master.xlsx dosyasını kontrol edin."
         ) from e
 
-    master_df.columns = ["master_urun_adi", "haric_isareti"]
+    master_df.columns = ["standart_urun_adi"]
+    master_toplam_satir = len(master_df)
 
-    master_df["master_urun_adi"] = master_df["master_urun_adi"].astype(str)
-    master_df["haric_isareti"] = master_df["haric_isareti"].astype(str)
-
-    master_df["master_key"] = master_df["master_urun_adi"].apply(normalize_urun_adi)
+    master_df["standart_urun_adi"] = master_df["standart_urun_adi"].astype(str).str.strip()
+    master_df["master_key"] = master_df["standart_urun_adi"].apply(normalize_urun_adi)
 
     baslik_keyleri = {
         "URUNADI",
@@ -360,82 +413,53 @@ def oku_master_haric_urunler():
         "STANDARTURUNADI",
     }
 
-    master_df = master_df[~master_df["master_key"].isin(baslik_keyleri)]
-
-    master_df["haric_temiz"] = (
-        master_df["haric_isareti"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .str.upper()
-    )
-
-    haric_df = master_df[
-        (master_df["haric_temiz"] == "X")
-        & (master_df["master_key"] != "")
+    master_df = master_df[
+        (master_df["master_key"] != "")
         & (master_df["master_key"] != "NAN")
+        & (~master_df["master_key"].isin(baslik_keyleri))
     ].copy()
 
-    haric_key_set = set(haric_df["master_key"].tolist())
+    master_df = master_df.drop_duplicates(subset=["master_key"], keep="first")
 
-    haric_df["Görünen Ürün Adı"] = haric_df["master_key"].apply(gorunen_urun_adi_olustur)
+    standart_isim_map = dict(
+        zip(master_df["master_key"], master_df["standart_urun_adi"])
+    )
 
-    haric_df = haric_df.rename(columns={
-        "master_key": "Normalize Key",
-    })
+    debug = {
+        "master_okundu": True,
+        "master_toplam_satir": master_toplam_satir,
+        "master_standart_key_sayisi": len(standart_isim_map),
+    }
 
-    haric_df = haric_df[
-        [
-            "Görünen Ürün Adı",
-            "Normalize Key",
-        ]
-    ]
-
-    return haric_key_set, haric_df, True
+    return standart_isim_map, master_df, True, debug
 
 
-def master_haric_eslesme_bul(ubs_key, master_haric_df, haric_key_set, esik_skor=85):
-    if ubs_key in haric_key_set:
-        return True, ubs_key, 100, "Birebir"
+def oku_master_standart_isimler():
+    master_path = master_dosya_yolu_bul()
 
-    if master_haric_df is None or master_haric_df.empty:
-        return False, "", 0, ""
+    if not os.path.exists(master_path):
+        return {}, pd.DataFrame(), False, {
+            "master_okundu": False,
+            "master_toplam_satir": 0,
+            "master_standart_key_sayisi": 0,
+        }
 
-    en_iyi_skor = 0
-    en_iyi_master_key = ""
+    master_mtime = os.path.getmtime(master_path)
 
-    for _, master_row in master_haric_df.iterrows():
-        master_key = str(master_row["Normalize Key"])
-
-        if master_key == "" or master_key == "NAN":
-            continue
-
-        skor1 = fuzz.ratio(ubs_key, master_key)
-        skor2 = fuzz.partial_ratio(ubs_key, master_key)
-        skor3 = fuzz.token_set_ratio(ubs_key, master_key)
-
-        skor = max(skor1, skor2, skor3)
-
-        if skor > en_iyi_skor:
-            en_iyi_skor = skor
-            en_iyi_master_key = master_key
-
-    if en_iyi_skor >= esik_skor:
-        return True, en_iyi_master_key, en_iyi_skor, "Fuzzy"
-
-    return False, en_iyi_master_key, en_iyi_skor, ""
+    return oku_master_standart_isimler_cached(master_path, master_mtime)
 
 
-# =========================
+# =========================================================
 # ÜBS DOSYASI OKUMA
 # A: Ürün adı
 # B: 3 aylık toplam satış
 # F: Stok
-# =========================
+# =========================================================
 
-def oku_ubs_tek_dosya(uploaded_file):
+@st.cache_data(show_spinner=False)
+def oku_ubs_tek_dosya_cached(file_bytes):
     try:
-        df = pd.read_excel(uploaded_file, usecols="A,B,F")
+        df = pd.read_excel(BytesIO(file_bytes), usecols="A,B,F")
     except Exception as e:
         raise ValueError(
             "Dosya okunamadı. Lütfen Eczanem programından alınan "
@@ -452,22 +476,20 @@ def oku_ubs_tek_dosya(uploaded_file):
     df = df[df["normalize_ad"] != "NAN"]
 
     sonuc = (
-        df.groupby("normalize_ad")
+        df.groupby("normalize_ad", as_index=False)
         .agg(
             toplam_3ay_satis=("toplam_3ay_satis", "sum"),
-            stok=("stok", "sum")
+            stok=("stok", "sum"),
+            ornek_ubs_adi=("urun_adi", "first")
         )
-        .reset_index()
     )
-
-    sonuc["gorunen_urun_adi"] = sonuc["normalize_ad"].apply(gorunen_urun_adi_olustur)
 
     return sonuc
 
 
-# =========================
+# =========================================================
 # SİPARİŞ DURUMU
-# =========================
+# =========================================================
 
 def siparis_durumu_belirle(row):
     ortalama_satis = row["ortalama_satis"]
@@ -498,53 +520,40 @@ def siparis_onceligi_belirle(durum):
     return priority_map.get(durum, 99)
 
 
-def streamlit_satir_renklendir(row):
-    durum = row.get("Durum", "")
-
-    if durum == "ACİL":
-        return ["background-color: #7A1F1F; color: #FFFFFF; font-weight: 700;"] * len(row)
-
-    if durum == "GEREK YOK":
-        return ["background-color: #3F3F46; color: #FFFFFF;"] * len(row)
-
-    return [""] * len(row)
-
-
-# =========================
+# =========================================================
 # SİPARİŞ HESAPLAMA
-# =========================
+# =========================================================
 
-def siparis_hesapla(ubs_file):
-    sonuc = oku_ubs_tek_dosya(ubs_file)
+def siparis_hesapla(file_bytes):
+    sonuc = oku_ubs_tek_dosya_cached(file_bytes)
 
     bugun = bugun_turkiye()
     toplam_is_gunu, kalan_is_gunu, ay_son_gun = ay_is_gunu_bilgisi(bugun)
 
-    haric_key_set, master_haric_df, master_var_mi = oku_master_haric_urunler()
+    standart_isim_map, master_df, master_var_mi, master_debug = oku_master_standart_isimler()
 
-    eslesme_sonuclari = sonuc["normalize_ad"].apply(
-        lambda key: master_haric_eslesme_bul(
-            key,
-            master_haric_df,
-            haric_key_set,
-            esik_skor=85
-        )
+    # Master sadece standart isim vermek için kullanılır.
+    sonuc["gorunen_urun_adi"] = sonuc["normalize_ad"].map(standart_isim_map)
+    sonuc["gorunen_urun_adi"] = sonuc["gorunen_urun_adi"].fillna(
+        sonuc["normalize_ad"].apply(gorunen_urun_adi_olustur)
     )
 
-    sonuc["master_haric"] = eslesme_sonuclari.apply(lambda x: x[0])
-    sonuc["master_eslesen_key"] = eslesme_sonuclari.apply(lambda x: x[1])
-    sonuc["master_eslesme_skoru"] = eslesme_sonuclari.apply(lambda x: x[2])
-    sonuc["master_eslesme_tipi"] = eslesme_sonuclari.apply(lambda x: x[3])
+    # Liste dışı artık C kolonu X ile değil, başlangıç markalarıyla belirlenir.
+    liste_disi_sonuclari = sonuc["normalize_ad"].apply(liste_disi_baslangic_bul)
+    sonuc["liste_disi"] = liste_disi_sonuclari.apply(lambda x: x[0])
+    sonuc["liste_disi_sebebi"] = liste_disi_sonuclari.apply(
+        lambda x: f"Başlangıç: {x[1]}" if x[0] else ""
+    )
 
-    haric_tutulan_ubs = sonuc[sonuc["master_haric"] == True].copy()
-    sonuc = sonuc[sonuc["master_haric"] == False].copy()
+    haric_tutulan_ubs = sonuc[sonuc["liste_disi"] == True].copy()
+    sonuc = sonuc[sonuc["liste_disi"] == False].copy()
 
     if not haric_tutulan_ubs.empty:
-        haric_tutulan_ubs["Ürün Adı"] = haric_tutulan_ubs["normalize_ad"].apply(gorunen_urun_adi_olustur)
-
         haric_tutulan_ubs = haric_tutulan_ubs.rename(columns={
+            "gorunen_urun_adi": "Ürün Adı",
             "toplam_3ay_satis": "3 Aylık Satış",
             "stok": "Stok",
+            "liste_disi_sebebi": "Liste Dışı Sebebi",
         })
 
         haric_tutulan_ubs = haric_tutulan_ubs[
@@ -552,6 +561,7 @@ def siparis_hesapla(ubs_file):
                 "Ürün Adı",
                 "3 Aylık Satış",
                 "Stok",
+                "Liste Dışı Sebebi",
             ]
         ]
     else:
@@ -560,6 +570,7 @@ def siparis_hesapla(ubs_file):
                 "Ürün Adı",
                 "3 Aylık Satış",
                 "Stok",
+                "Liste Dışı Sebebi",
             ]
         )
 
@@ -572,7 +583,6 @@ def siparis_hesapla(ubs_file):
     sonuc["ortalama_gunluk_satis"] = sonuc["ortalama_satis"] / toplam_is_gunu
     sonuc["ortalama_gunluk_satis"] = sonuc["ortalama_gunluk_satis"].round(4)
 
-    # Kalan ay ihtiyacı hesapta kullanılır; sonuç/Excel/PDF'te gösterilmez.
     sonuc["kalan_ay_ihtiyaci"] = sonuc["ortalama_gunluk_satis"] * kalan_is_gunu
     sonuc["kalan_ay_ihtiyaci"] = sonuc["kalan_ay_ihtiyaci"].round(2)
 
@@ -659,12 +669,19 @@ def siparis_hesapla(ubs_file):
         "ay_son_gun": ay_son_gun,
     }
 
-    return sonuc, haric_tutulan_ubs, master_haric_df, master_var_mi, is_gunu_bilgi
+    debug_bilgi = {
+        **master_debug,
+        "liste_disi_baslangic_sayisi": len(LISTE_DISI_BASLANGICLAR_RAW),
+        "ubs_normalize_urun_sayisi": len(sonuc) + len(haric_tutulan_ubs),
+        "ubs_liste_disi_cikarilan_sayisi": len(haric_tutulan_ubs),
+    }
+
+    return sonuc, haric_tutulan_ubs, master_df, master_var_mi, is_gunu_bilgi, debug_bilgi
 
 
-# =========================
+# =========================================================
 # EXCEL FORMAT / İNDİRME
-# =========================
+# =========================================================
 
 def excel_sayfa_formatla(worksheet):
     from openpyxl.styles import Font, Alignment
@@ -802,9 +819,9 @@ def excel_indir(df, haric_df=None):
     return output.getvalue()
 
 
-# =========================
+# =========================================================
 # PDF İNDİRME
-# =========================
+# =========================================================
 
 def pdf_indir(df):
     try:
@@ -989,16 +1006,53 @@ def pdf_indir(df):
     return output.getvalue()
 
 
-# =========================
-# WEB ARAYÜZ
-# =========================
+# =========================================================
+# TABLO ARAMA
+# =========================================================
 
-st.set_page_config(
-    page_title="Eczane Sipariş Motoru",
-    layout="wide"
-)
+def tablo_ara(sonuc, arama):
+    if not arama:
+        filtre = sonuc.copy()
+        filtre["Arama Skoru"] = ""
+        return filtre
+
+    arama_key = normalize_urun_adi(arama)
+
+    sonuc_goster = sonuc.copy()
+
+    def arama_skoru(row):
+        urun_adi_gorunen = str(row["Ürün Adı"])
+        urun_key = normalize_urun_adi(urun_adi_gorunen)
+
+        if len(arama_key) >= 3:
+            if urun_key.startswith(arama_key):
+                return 100
+
+        if arama_key in urun_key:
+            return 95
+
+        skor1 = fuzz.partial_ratio(urun_key, arama_key)
+        skor2 = fuzz.token_set_ratio(urun_key, arama_key)
+
+        return max(skor1, skor2)
+
+    sonuc_goster["Arama Skoru"] = sonuc_goster.apply(arama_skoru, axis=1)
+
+    filtre = sonuc_goster[sonuc_goster["Arama Skoru"] >= 55].copy()
+    filtre = filtre.sort_values(
+        ["Arama Skoru", "Top. Sipariş Mik."],
+        ascending=[False, False]
+    )
+
+    return filtre
+
+
+# =========================================================
+# WEB ARAYÜZ
+# =========================================================
 
 st.title("Eczane Sipariş Motoru")
+st.caption("Tek Excel dosyasından akıllı sipariş önerisi")
 
 bugun = bugun_turkiye()
 toplam_is_gunu, kalan_is_gunu, ay_son_gun = ay_is_gunu_bilgisi(bugun)
@@ -1025,8 +1079,9 @@ with st.expander("📌 Kullanım kılavuzunu görüntüle", expanded=False):
     )
 
     st.warning(
-        "Lütfen Eczanem programından alınan "
-        "Ürün Bazında Satış raporunu Excel formatında yükleyin."
+        "Dosya yapısı: **A sütunu Ürün Adı**, "
+        "**B sütunu 3 aylık toplam satış**, "
+        "**F sütunu Stok Mik.**"
     )
 
 
@@ -1037,7 +1092,7 @@ with col1:
 
     with st.container(border=True):
         ubs_file = st.file_uploader(
-            "Belirtilen tarihlere göre alınmış 3 aylık Ürün Bazında Satış excel dosyasını yükleyin",
+            "Belirtilen tarihlere göre alınmış 3 aylık Ürün Bazında Satış Excel dosyasını yükleyin",
             type=["xls", "xlsx"]
         )
 
@@ -1078,16 +1133,33 @@ st.divider()
 
 if not ubs_file:
     st.info("Sipariş hazırlamak için lütfen 3 aylık ÜBS satış dosyasını yükleyin.")
+
 else:
     if siparis_hazirla_clicked:
         try:
-            sonuc, haric_tutulan_ubs, master_haric_df, master_var_mi, is_gunu_bilgi = siparis_hesapla(ubs_file)
+            with st.spinner("Sipariş listesi hazırlanıyor..."):
+                file_bytes = ubs_file.getvalue()
 
-            st.session_state["sonuc"] = sonuc
-            st.session_state["haric_tutulan_ubs"] = haric_tutulan_ubs
-            st.session_state["master_haric_df"] = master_haric_df
-            st.session_state["master_var_mi"] = master_var_mi
-            st.session_state["is_gunu_bilgi"] = is_gunu_bilgi
+                (
+                    sonuc,
+                    haric_tutulan_ubs,
+                    master_df,
+                    master_var_mi,
+                    is_gunu_bilgi,
+                    debug_bilgi,
+                ) = siparis_hesapla(file_bytes)
+
+                st.session_state["sonuc"] = sonuc
+                st.session_state["haric_tutulan_ubs"] = haric_tutulan_ubs
+                st.session_state["master_df"] = master_df
+                st.session_state["master_var_mi"] = master_var_mi
+                st.session_state["is_gunu_bilgi"] = is_gunu_bilgi
+                st.session_state["debug_bilgi"] = debug_bilgi
+
+                st.session_state.pop("excel_data", None)
+                st.session_state.pop("pdf_data", None)
+
+            st.success("Hesaplama tamamlandı.")
 
         except Exception as e:
             st.error(f"Hesaplama sırasında hata oluştu: {e}")
@@ -1098,8 +1170,7 @@ if "sonuc" in st.session_state:
     haric_tutulan_ubs = st.session_state.get("haric_tutulan_ubs", pd.DataFrame())
     master_var_mi = st.session_state.get("master_var_mi", False)
     is_gunu_bilgi = st.session_state.get("is_gunu_bilgi", {})
-
-    st.success("Hesaplama tamamlandı.")
+    debug_bilgi = st.session_state.get("debug_bilgi", {})
 
     toplam_acil = len(sonuc[sonuc["Durum"] == "ACİL"])
     toplam_siparis = len(sonuc[sonuc["Durum"] == "SİPARİŞ"])
@@ -1121,122 +1192,94 @@ if "sonuc" in st.session_state:
     )
 
     if master_var_mi:
-        if toplam_haric > 0:
-            st.info(
-                f"İlaç dışı / siparişe dahil edilmeyecek {toplam_haric} ürün "
-                f"sipariş listesinden çıkarıldı. Lütfen kontrol edin."
-            )
-        else:
-            st.info(
-                "İlaç dışı / siparişe dahil edilmeyecek ürün kontrolü yapıldı. "
-                "Sipariş listesinden çıkarılan ürün bulunamadı."
-            )
+        st.info(
+            "Master dosya okundu. Ürün isimleri mümkün olduğu ölçüde master listedeki standart isimlerle gösteriliyor."
+        )
     else:
         st.warning(
-            "İlaç dışı ürün kontrol listesi bulunamadı. "
-            "Sipariş listesini manuel kontrol edin."
+            "Master dosya bulunamadı. Ürün isimleri normalize edilmiş ÜBS adına göre gösteriliyor. "
+            "Liste dışı başlangıç kuralları yine çalışır."
         )
+
+    if toplam_haric > 0:
+        st.info(
+            f"Başlangıç kuralına göre {toplam_haric} ürün sipariş listesinden çıkarıldı."
+        )
+    else:
+        st.info("Başlangıç kuralına göre listeden çıkarılan ürün bulunamadı.")
+
+    with st.expander("Kontrol / Debug Bilgisi", expanded=False):
+        st.write(f"Master dosya okundu mu: **{debug_bilgi.get('master_okundu', False)}**")
+        st.write(f"Master toplam satır: **{debug_bilgi.get('master_toplam_satir', 0)}**")
+        st.write(f"Master standart key sayısı: **{debug_bilgi.get('master_standart_key_sayisi', 0)}**")
+        st.write(f"Liste dışı başlangıç sayısı: **{debug_bilgi.get('liste_disi_baslangic_sayisi', 0)}**")
+        st.write(f"ÜBS normalize ürün sayısı: **{debug_bilgi.get('ubs_normalize_urun_sayisi', 0)}**")
+        st.write(
+            f"ÜBS içinde başlangıç kuralıyla çıkarılan ürün sayısı: "
+            f"**{debug_bilgi.get('ubs_liste_disi_cikarilan_sayisi', 0)}**"
+        )
+
+        st.markdown("#### Liste dışı başlangıçlar")
+        st.code(", ".join(LISTE_DISI_BASLANGICLAR_RAW))
+
+        if not haric_tutulan_ubs.empty:
+            st.markdown("#### İlk 20 çıkarılan ürün")
+            st.dataframe(
+                haric_tutulan_ubs.head(20),
+                use_container_width=True,
+                hide_index=True
+            )
+
+    st.divider()
 
     download_col1, download_col2, download_col3 = st.columns([1, 1, 2])
 
     with download_col1:
-        excel_data = excel_indir(
-            st.session_state["sonuc"],
-            st.session_state.get("haric_tutulan_ubs"),
-        )
+        if st.button("Excel Hazırla", use_container_width=True):
+            try:
+                with st.spinner("Excel hazırlanıyor..."):
+                    st.session_state["excel_data"] = excel_indir(
+                        st.session_state["sonuc"],
+                        st.session_state.get("haric_tutulan_ubs"),
+                    )
+            except Exception as e:
+                st.error(f"Excel oluşturulamadı: {e}")
 
-        st.download_button(
-            label="Excel İndir",
-            data=excel_data,
-            file_name="siparis_sonuc.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+        if "excel_data" in st.session_state:
+            st.download_button(
+                label="Excel İndir",
+                data=st.session_state["excel_data"],
+                file_name="siparis_sonuc.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
     with download_col2:
-        try:
-            pdf_data = pdf_indir(st.session_state["sonuc"])
+        if st.button("Acil PDF Hazırla", use_container_width=True):
+            try:
+                with st.spinner("PDF hazırlanıyor..."):
+                    st.session_state["pdf_data"] = pdf_indir(st.session_state["sonuc"])
+            except Exception as e:
+                st.error(f"PDF oluşturulamadı: {e}")
 
+        if "pdf_data" in st.session_state:
             st.download_button(
                 label="Acil Sipariş PDF İndir",
-                data=pdf_data,
+                data=st.session_state["pdf_data"],
                 file_name="acil_siparis_listesi.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
-        except Exception as e:
-            st.error(f"PDF oluşturulamadı: {e}")
 
     arama = st.text_input("Ürün adı ara")
 
-    if arama:
-        arama_key = normalize_urun_adi(arama)
-
-        sonuc_goster = sonuc.copy()
-
-        def arama_skoru(row):
-            urun_adi_gorunen = str(row["Ürün Adı"])
-            urun_key = normalize_urun_adi(urun_adi_gorunen)
-
-            if len(arama_key) >= 3:
-                if urun_key.startswith(arama_key):
-                    return 100
-
-            if arama_key in urun_key:
-                return 95
-
-            skor1 = fuzz.partial_ratio(urun_key, arama_key)
-            skor2 = fuzz.token_set_ratio(urun_key, arama_key)
-
-            return max(skor1, skor2)
-
-        sonuc_goster["Arama Skoru"] = sonuc_goster.apply(arama_skoru, axis=1)
-
-        filtre = sonuc_goster[sonuc_goster["Arama Skoru"] >= 55].copy()
-        filtre = filtre.sort_values(
-            ["Arama Skoru", "Top. Sipariş Mik."],
-            ascending=[False, False]
-        )
-
-    else:
-        filtre = sonuc.copy()
-        filtre["Arama Skoru"] = ""
-
+    filtre = tablo_ara(sonuc, arama)
     filtre_gorunum = filtre.drop(columns=["Arama Skoru"], errors="ignore")
 
     st.subheader("Sipariş Listesi")
 
-    ortalanacak_kolonlar = [
-        col for col in filtre_gorunum.columns
-        if col != "Ürün Adı"
-    ]
-
     st.dataframe(
-        filtre_gorunum.style
-        .apply(streamlit_satir_renklendir, axis=1)
-        .format(sayi_formatla)
-        .set_properties(
-            subset=["Ürün Adı"],
-            **{
-                "text-align": "left"
-            }
-        )
-        .set_properties(
-            subset=ortalanacak_kolonlar,
-            **{
-                "text-align": "center"
-            }
-        )
-        .set_table_styles(
-            [
-                {
-                    "selector": "th",
-                    "props": [
-                        ("text-align", "center")
-                    ]
-                }
-            ]
-        ),
+        filtre_gorunum.style.format(sayi_formatla),
         use_container_width=True,
         hide_index=True
     )
@@ -1245,36 +1288,8 @@ if "sonuc" in st.session_state:
         if haric_tutulan_ubs.empty:
             st.info("Sipariş listesinden çıkarılan ürün yok.")
         else:
-            haric_ortalanacak_kolonlar = [
-                col for col in haric_tutulan_ubs.columns
-                if col != "Ürün Adı"
-            ]
-
             st.dataframe(
-                haric_tutulan_ubs.style
-                .format(sayi_formatla)
-                .set_properties(
-                    subset=["Ürün Adı"],
-                    **{
-                        "text-align": "left"
-                    }
-                )
-                .set_properties(
-                    subset=haric_ortalanacak_kolonlar,
-                    **{
-                        "text-align": "center"
-                    }
-                )
-                .set_table_styles(
-                    [
-                        {
-                            "selector": "th",
-                            "props": [
-                                ("text-align", "center")
-                            ]
-                        }
-                    ]
-                ),
+                haric_tutulan_ubs.style.format(sayi_formatla),
                 use_container_width=True,
                 hide_index=True
             )

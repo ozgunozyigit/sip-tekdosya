@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import re
 import math
@@ -1018,7 +1019,7 @@ def pdf_indir(df):
 
 
 # =========================================================
-# TABLO ARAMA / RENKLENDİRME
+# TABLO ARAMA / RENKLENDİRME / SCROLL
 # =========================================================
 
 def tablo_ara(sonuc, arama):
@@ -1062,6 +1063,21 @@ def satir_renklendir(row):
     if row.get("Durum") == "ACİL":
         return ["background-color: #FDECEC;"] * len(row)
     return [""] * len(row)
+
+
+def scroll_to_results():
+    components.html(
+        """
+        <script>
+            const doc = window.parent.document;
+            const target = doc.getElementById("sonuc-bolumu");
+            if (target) {
+                target.scrollIntoView({ behavior: "smooth", block: "start" });
+            }
+        </script>
+        """,
+        height=0,
+    )
 
 
 # =========================================================
@@ -1172,6 +1188,7 @@ else:
                 st.session_state["master_var_mi"] = master_var_mi
                 st.session_state["is_gunu_bilgi"] = is_gunu_bilgi
                 st.session_state["debug_bilgi"] = debug_bilgi
+                st.session_state["scroll_to_results"] = True
 
             st.success("Hesaplama tamamlandı.")
 
@@ -1180,6 +1197,8 @@ else:
 
 
 if "sonuc" in st.session_state:
+    st.markdown('<div id="sonuc-bolumu"></div>', unsafe_allow_html=True)
+
     sonuc = st.session_state["sonuc"]
     haric_tutulan_ubs = st.session_state.get("haric_tutulan_ubs", pd.DataFrame())
     master_var_mi = st.session_state.get("master_var_mi", False)
@@ -1300,3 +1319,7 @@ if "sonuc" in st.session_state:
                 use_container_width=True,
                 hide_index=True
             )
+
+    if st.session_state.get("scroll_to_results"):
+        scroll_to_results()
+        st.session_state["scroll_to_results"] = False

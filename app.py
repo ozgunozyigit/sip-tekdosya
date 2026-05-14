@@ -15,7 +15,7 @@ from rapidfuzz import fuzz
 # =========================================================
 
 st.set_page_config(
-    page_title="Eczane Sipariş Motoru",
+    page_title="Eczane Sipariş ENGINe",
     layout="wide"
 )
 

@@ -592,7 +592,7 @@ def siparis_hesapla(file_bytes):
 
     sonuc["hesap_stok"] = sonuc["stok"].apply(lambda x: max(x, 0))
 
-    sonuc["ortalama_gunluk_satis"] = sonuc["ortalama_satis"] / toplam_is_gunu
+    sonuc["ortalama_gunluk_satis"] = sonuc["ortalama_satis"] / 22
     sonuc["ortalama_gunluk_satis"] = sonuc["ortalama_gunluk_satis"].round(4)
 
     sonuc["kalan_ay_ihtiyaci"] = sonuc["ortalama_gunluk_satis"] * kalan_is_gunu

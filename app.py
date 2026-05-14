@@ -211,6 +211,9 @@ def normalize_urun_adi(text):
 
     text = re.sub(r"\s+", "", text)
 
+    # Yüzde sonrası O/0 karışıklığı: %O15 -> %015
+    text = text.replace("%O", "%0")
+
     # Sayıdan sonra gelen O harfini 0 yapar: 2OO -> 200
     for _ in range(5):
         text = re.sub(r"(\d)O", r"\g<1>0", text)
@@ -239,8 +242,16 @@ def gorunen_urun_adi_olustur(normalize_key):
     if text == "" or text == "NAN":
         return ""
 
+    # %015 gibi ifadeleri %0.15 şeklinde gösterir.
+    # Örnek: ALPHAGANP%015GOZ -> ALPHAGANP %0.15 GOZ
+    text = re.sub(r"%0(\d{2})(?=[A-Z])", r" %0.\1 ", text)
+
+    # %5DEXTROZ gibi ifadeleri %5 DEXTROZ şeklinde gösterir.
+    text = re.sub(r"%(\d+(?:\.\d+)?)(?=[A-Z])", r" %\1 ", text)
+
+    # Tek başına G kaldırıldı. Çünkü 15GOZ ifadesinde 15 G OZ hatası oluşturuyordu.
     birimler = [
-        "MCG", "MG", "ML", "CM", "MM", "CC", "IU", "GR", "G"
+        "MCG", "MG", "ML", "CM", "MM", "CC", "IU", "GR"
     ]
 
     birim_regex = "|".join(sorted(birimler, key=len, reverse=True))
@@ -311,6 +322,7 @@ def gorunen_urun_adi_olustur(normalize_key):
         "STERIL",
         "ENERJI",
         "ENERGY",
+        "COZELTI",
     ]
 
     kelimeler = sorted(set(kelimeler), key=len, reverse=True)
@@ -369,7 +381,7 @@ def sayi_formatla(value):
 # urun_master.xlsx
 # Sadece isim standardizasyonu için kullanılır.
 # B kolonu: standart ürün adı
-# C kolonu artık kullanılmaz.
+# C kolonu kullanılmaz.
 # =========================================================
 
 def master_dosya_yolu_bul():
@@ -475,11 +487,13 @@ def oku_ubs_tek_dosya_cached(file_bytes):
     df = df[df["normalize_ad"] != ""]
     df = df[df["normalize_ad"] != "NAN"]
 
+    # Aynı ürün farklı fiyatlardan satılmış olabilir.
+    # Satışlar toplanır; stok güncel değer olduğu için toplanmaz, ilk değer alınır.
     sonuc = (
         df.groupby("normalize_ad", as_index=False)
         .agg(
             toplam_3ay_satis=("toplam_3ay_satis", "sum"),
-            stok=("stok", "sum"),
+            stok=("stok", "first"),
             ornek_ubs_adi=("urun_adi", "first")
         )
     )
@@ -532,13 +546,11 @@ def siparis_hesapla(file_bytes):
 
     standart_isim_map, master_df, master_var_mi, master_debug = oku_master_standart_isimler()
 
-    # Master sadece standart isim vermek için kullanılır.
     sonuc["gorunen_urun_adi"] = sonuc["normalize_ad"].map(standart_isim_map)
     sonuc["gorunen_urun_adi"] = sonuc["gorunen_urun_adi"].fillna(
         sonuc["normalize_ad"].apply(gorunen_urun_adi_olustur)
     )
 
-    # Liste dışı artık C kolonu X ile değil, başlangıç markalarıyla belirlenir.
     liste_disi_sonuclari = sonuc["normalize_ad"].apply(liste_disi_baslangic_bul)
     sonuc["liste_disi"] = liste_disi_sonuclari.apply(lambda x: x[0])
     sonuc["liste_disi_sebebi"] = liste_disi_sonuclari.apply(
@@ -577,7 +589,6 @@ def siparis_hesapla(file_bytes):
     sonuc["ortalama_satis"] = sonuc["toplam_3ay_satis"] / 3
     sonuc["ortalama_satis"] = sonuc["ortalama_satis"].round(2)
 
-    # Negatif stoklar sipariş hesabında 0 kabul edilir.
     sonuc["hesap_stok"] = sonuc["stok"].apply(lambda x: max(x, 0))
 
     sonuc["ortalama_gunluk_satis"] = sonuc["ortalama_satis"] / toplam_is_gunu
@@ -1219,9 +1230,6 @@ if "sonuc" in st.session_state:
             f"**{debug_bilgi.get('ubs_liste_disi_cikarilan_sayisi', 0)}**"
         )
 
-        st.markdown("#### Liste dışı başlangıçlar")
-        st.code(", ".join(LISTE_DISI_BASLANGICLAR_RAW))
-
         if not haric_tutulan_ubs.empty:
             st.markdown("#### İlk 20 çıkarılan ürün")
             st.dataframe(
@@ -1278,11 +1286,18 @@ if "sonuc" in st.session_state:
 
     st.subheader("Sipariş Listesi")
 
+    def satir_renklendir(row):
+        if row.get("Durum") == "ACİL":
+            return ["background-color: #FDECEC;"] * len(row)
+        return [""] * len(row)
+
     st.dataframe(
-        filtre_gorunum.style.format(sayi_formatla),
+        filtre_gorunum.style
+        .apply(satir_renklendir, axis=1)
+        .format(sayi_formatla),
         use_container_width=True,
         hide_index=True
-    )
+)
 
     with st.expander("Sipariş listesinden çıkarılan ürünler", expanded=True):
         if haric_tutulan_ubs.empty:

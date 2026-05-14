@@ -1095,15 +1095,15 @@ rapor_baslangic, rapor_bitis = onerilen_rapor_araligi()
 rapor_araligi_metni = f"{turkce_tarih_yaz(rapor_baslangic)} - {turkce_tarih_yaz(rapor_bitis)}"
 
 with st.expander("📌 Kullanım kılavuzunu görüntüle", expanded=False):
-    st.markdown("### ✅ ÜBS Satış Raporu")
+    st.markdown("### ✅ ECZANEM Satış Raporu - Ürün Bazında Toplamlar Excel")
 
     st.info(
-        f"📅 Önerilen Rapor Tarih Aralığı: **{rapor_araligi_metni}**"
+        f"📅 Seçilmesi gerekn Rapor Tarih Aralığı: **{rapor_araligi_metni}**"
     )
 
     st.write(
         "Eczanem programından geçmiş 3 tamamlanmış ayı kapsayan "
-        "“Ürün Bazında Satış” raporunu tek Excel dosyası olarak kaydedin."
+        "“Ürün Bazında Toplamlar” sekmesini seçerek tek Excel dosyası olarak kaydedin."
     )
 
     st.write(
@@ -1121,11 +1121,11 @@ with st.expander("📌 Kullanım kılavuzunu görüntüle", expanded=False):
 col1, col2 = st.columns([1, 1])
 
 with col1:
-    st.subheader("Ürün Bazında Satış Raporu")
+    st.subheader("Ürün Bazında Toplamlar Satış Raporu")
 
     with st.container(border=True):
         ubs_file = st.file_uploader(
-            "Belirtilen tarihlere göre alınmış 3 aylık Ürün Bazında Satış Excel dosyasını yükleyin",
+            "Belirtilen tarihlere göre alınmış 3 aylık Ürün Bazında Toplamlar Satış Raporu Excel dosyasını yükleyin",
             type=["xls", "xlsx"]
         )
 
@@ -1137,10 +1137,10 @@ with col1:
         )
 
 with col2:
-    st.subheader("Rapor Bilgisi")
+    st.subheader("Rapor Tarih Bilgisi")
 
     with st.container(border=True):
-        st.caption("Önerilen rapor aralığı")
+        st.caption("Seçilmesi gereken rapor aralığı")
         st.markdown(f"**{rapor_araligi_metni}**")
 
         st.caption("Bugün")

@@ -1084,8 +1084,8 @@ def scroll_to_results():
 # WEB ARAYÜZ
 # =========================================================
 
-st.title("Eczane Sipariş Motoru")
-st.caption("Tek Excel dosyasından akıllı sipariş önerisi")
+st.title("Eczane Sipariş ENGINe")
+st.caption("Düşük Stok Sipariş Listesi")
 
 bugun = bugun_turkiye()
 toplam_is_gunu, kalan_is_gunu, ay_son_gun = ay_is_gunu_bilgisi(bugun)

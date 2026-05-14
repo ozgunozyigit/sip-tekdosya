@@ -1018,7 +1018,7 @@ def pdf_indir(df):
 
 
 # =========================================================
-# TABLO ARAMA
+# TABLO ARAMA / RENKLENDİRME
 # =========================================================
 
 def tablo_ara(sonuc, arama):
@@ -1056,6 +1056,12 @@ def tablo_ara(sonuc, arama):
     )
 
     return filtre
+
+
+def satir_renklendir(row):
+    if row.get("Durum") == "ACİL":
+        return ["background-color: #FDECEC;"] * len(row)
+    return [""] * len(row)
 
 
 # =========================================================
@@ -1167,9 +1173,6 @@ else:
                 st.session_state["is_gunu_bilgi"] = is_gunu_bilgi
                 st.session_state["debug_bilgi"] = debug_bilgi
 
-                st.session_state.pop("excel_data", None)
-                st.session_state.pop("pdf_data", None)
-
             st.success("Hesaplama tamamlandı.")
 
         except Exception as e:
@@ -1243,41 +1246,35 @@ if "sonuc" in st.session_state:
     download_col1, download_col2, download_col3 = st.columns([1, 1, 2])
 
     with download_col1:
-        if st.button("Excel Hazırla", use_container_width=True):
-            try:
-                with st.spinner("Excel hazırlanıyor..."):
-                    st.session_state["excel_data"] = excel_indir(
-                        st.session_state["sonuc"],
-                        st.session_state.get("haric_tutulan_ubs"),
-                    )
-            except Exception as e:
-                st.error(f"Excel oluşturulamadı: {e}")
+        try:
+            excel_data = excel_indir(
+                st.session_state["sonuc"],
+                st.session_state.get("haric_tutulan_ubs"),
+            )
 
-        if "excel_data" in st.session_state:
             st.download_button(
                 label="Excel İndir",
-                data=st.session_state["excel_data"],
+                data=excel_data,
                 file_name="siparis_sonuc.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True
             )
+        except Exception as e:
+            st.error(f"Excel oluşturulamadı: {e}")
 
     with download_col2:
-        if st.button("Acil PDF Hazırla", use_container_width=True):
-            try:
-                with st.spinner("PDF hazırlanıyor..."):
-                    st.session_state["pdf_data"] = pdf_indir(st.session_state["sonuc"])
-            except Exception as e:
-                st.error(f"PDF oluşturulamadı: {e}")
+        try:
+            pdf_data = pdf_indir(st.session_state["sonuc"])
 
-        if "pdf_data" in st.session_state:
             st.download_button(
                 label="Acil Sipariş PDF İndir",
-                data=st.session_state["pdf_data"],
+                data=pdf_data,
                 file_name="acil_siparis_listesi.pdf",
                 mime="application/pdf",
                 use_container_width=True
             )
+        except Exception as e:
+            st.error(f"PDF oluşturulamadı: {e}")
 
     arama = st.text_input("Ürün adı ara")
 
@@ -1286,18 +1283,13 @@ if "sonuc" in st.session_state:
 
     st.subheader("Sipariş Listesi")
 
-    def satir_renklendir(row):
-        if row.get("Durum") == "ACİL":
-            return ["background-color: #FDECEC;"] * len(row)
-        return [""] * len(row)
-
     st.dataframe(
         filtre_gorunum.style
         .apply(satir_renklendir, axis=1)
         .format(sayi_formatla),
         use_container_width=True,
         hide_index=True
-)
+    )
 
     with st.expander("Sipariş listesinden çıkarılan ürünler", expanded=True):
         if haric_tutulan_ubs.empty:
